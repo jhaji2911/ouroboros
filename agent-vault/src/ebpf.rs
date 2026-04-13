@@ -4,11 +4,11 @@
 //! attaches the program, and populates the kernel HashMap with the token pair.
 
 use aya::{
+    bpf::Ebpf,
     maps::HashMap,
     programs::{CgroupSkb, CgroupSkbAttachType},
-    Bpf,
 };
-use aya_log::BpfLogger;
+use aya_log::EbpfLogger;
 use agent_vault_common::TokenPair;
 use anyhow::{Context, Result};
 use std::{fs, os::unix::fs::MetadataExt};
@@ -28,13 +28,13 @@ const REAL_TOKEN: &[u8; 16] = b"REAL_SECRET_9999";
 
 pub async fn run_ebpf_mode() -> Result<()> {
     // 1. Load the eBPF object file compiled for bpfel-unknown-none.
-    let mut bpf = Bpf::load(include_bytes!(
+    let mut bpf = Ebpf::load(include_bytes!(
         "../../target/bpfel-unknown-none/release/agent-vault-ebpf"
     ))
     .context("Failed to load eBPF object. Did you run the eBPF build step first?")?;
 
     // 2. Route eBPF log output (from aya_log_ebpf::info! calls) to the host logger.
-    BpfLogger::init(&mut bpf).context("Failed to init BPF logger")?;
+    EbpfLogger::init(&mut bpf).context("Failed to init BPF logger")?;
 
     // 3. Create the test cgroup under the host-mounted cgroupfs (cgroup v2).
     fs::create_dir_all(CGROUP_PATH)
