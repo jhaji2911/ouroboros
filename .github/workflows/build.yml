@@ -1,0 +1,87 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build eBPF & Daemon
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install nightly Rust (for eBPF)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            llvm \
+            clang \
+            libelf-dev \
+            linux-headers-generic \
+            bpftool
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker
+
+      - name: Build all (eBPF + daemon)
+        run: cargo xtask build-all --release
+
+      - name: Verify artifacts exist
+        run: |
+          ls -lh target/bpfel-unknown-none/release/agent-vault-ebpf
+          ls -lh target/release/agent-vault
+
+      - name: Upload eBPF bytecode
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-vault-ebpf-bytecode
+          path: target/bpfel-unknown-none/release/agent-vault-ebpf
+          retention-days: 30
+
+      - name: Upload agent-vault binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-vault-binary
+          path: target/release/agent-vault
+          retention-days: 30
+
+      - name: Create release artifacts tarball
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p release
+          cp target/bpfel-unknown-none/release/agent-vault-ebpf release/
+          cp target/release/agent-vault release/
+          tar -czf agent-vault-${{ github.ref_name }}.tar.gz release/
+          sha256sum agent-vault-${{ github.ref_name }}.tar.gz > agent-vault-${{ github.ref_name }}.tar.gz.sha256
+
+      - name: Upload release tarball
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-vault-release-${{ github.ref_name }}
+          path: |
+            agent-vault-${{ github.ref_name }}.tar.gz
+            agent-vault-${{ github.ref_name }}.tar.gz.sha256
+          retention-days: 90

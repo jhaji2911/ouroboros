@@ -3,8 +3,10 @@ members = [
     "agent-vault-common",
     "agent-vault-ebpf",
     "agent-vault",
+    "xtask",
 ]
 # Don't try to build the eBPF crate with the host target by default.
 # Build it explicitly: cargo +nightly build --package agent-vault-ebpf --target bpfel-unknown-none -Z build-std=core --release
+# xtask is excluded from default because it's a build tool, not a library.
 default-members = ["agent-vault-common", "agent-vault"]
 resolver = "2"
