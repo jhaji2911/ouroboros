@@ -19,6 +19,7 @@ use aya_ebpf::{
     macros::{cgroup_skb, map},
     maps::HashMap,
     programs::SkBuffContext,
+    EbpfContext,
 };
 use aya_log_ebpf::info;
 use agent_vault_common::TokenPair;
@@ -52,7 +53,7 @@ const BPF_F_PSEUDO_HDR: u64 = 0x10;
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
-#[cgroup_skb(name = "cgroup_skb_egress")]
+#[cgroup_skb]
 pub fn cgroup_skb_egress(ctx: SkBuffContext) -> i32 {
     match try_intercept(&ctx) {
         Ok(ret) => ret,
