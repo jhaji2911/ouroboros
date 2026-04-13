@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 # aya is only needed to provide the `Pod` marker trait impl for user-space map operations.
 # Feature is enabled by the user-space daemon crate, NOT the eBPF crate.
-aya = { version = "0.12", optional = true, default-features = false }
+aya = { version = "0.13.1", optional = true, default-features = false }
 
 [features]
 default = []

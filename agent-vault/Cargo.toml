@@ -26,8 +26,8 @@ agent-vault-common = { path = "../agent-vault-common" }
 # Linux-only: enable "userspace" feature which pulls in aya for eBPF map access
 [target.'cfg(target_os = "linux")'.dependencies]
 agent-vault-common = { path = "../agent-vault-common", features = ["userspace"] }
-aya            = "0.12"
-aya-log        = "0.2"
+aya            = "0.13.1"
+aya-log        = "0.2.1"
 http           = "0.2"
 futures        = "0.3"
 bytes          = "1"
