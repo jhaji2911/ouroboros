@@ -54,8 +54,10 @@ fn main() -> Result<()> {
 fn build_ebpf(release: bool) -> Result<()> {
     println!("🛠️  Building eBPF program (agent-vault-ebpf)...");
 
-    let mut cmd = Command::new("cargo");
-    cmd.arg("+nightly")
+    let mut cmd = Command::new("rustup");
+    cmd.arg("run")
+        .arg("nightly")
+        .arg("cargo")
         .arg("build")
         .arg("--package")
         .arg("agent-vault-ebpf")
@@ -70,7 +72,7 @@ fn build_ebpf(release: bool) -> Result<()> {
 
     let output = cmd
         .output()
-        .context("Failed to spawn cargo +nightly build for eBPF")?;
+        .context("Failed to spawn rustup run nightly cargo build for eBPF")?;
 
     if !output.status.success() {
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));

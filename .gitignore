@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# Build byproducts
+*.o
+*.a
+*.so
+*.dylib
+
+# eBPF-specific artifacts
+*.bpfo
+*.bpfe
+agent-vault-ebpf/target/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+
+# OS files
+Thumbs.db

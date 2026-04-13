@@ -56,24 +56,26 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Determine which mode to run
-    let mode = match args.mode {
-        Some(m) => m,
-        None => {
-            // Auto-detect based on platform
-            #[cfg(target_os = "linux")]
-            {
-                Mode::Ebpf
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Mode::Proxy
-            }
+    #[cfg(target_os = "linux")]
+    {
+        let mode = match args.mode {
+            Some(Mode::Ebpf) => Mode::Ebpf,
+            Some(Mode::Proxy) => Mode::Proxy,
+            None => Mode::Ebpf, // Default to eBPF on Linux
+        };
+        match mode {
+            Mode::Ebpf => ebpf::run_ebpf_mode().await,
+            Mode::Proxy => proxy::run_proxy_mode().await,
         }
-    };
+    }
 
-    match mode {
-        #[cfg(target_os = "linux")]
-        Mode::Ebpf => ebpf::run_ebpf_mode().await,
-        Mode::Proxy => proxy::run_proxy_mode().await,
+    #[cfg(not(target_os = "linux"))]
+    {
+        // On non-Linux platforms, force proxy mode (eBPF not supported)
+        if let Some(Mode::Proxy) = args.mode {
+            proxy::run_proxy_mode().await
+        } else {
+            proxy::run_proxy_mode().await
+        }
     }
 }

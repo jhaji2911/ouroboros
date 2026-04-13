@@ -8,16 +8,26 @@ name = "agent-vault"
 path = "src/main.rs"
 
 [dependencies]
-aya            = "0.12"
-aya-log        = "0.2"
-# Enable the "userspace" feature so agent-vault-common provides aya::Pod for TokenPair.
-agent-vault-common = { path = "../agent-vault-common", features = ["userspace"] }
 anyhow         = "1"
 tokio          = { version = "1", features = ["macros", "rt-multi-thread", "signal", "io-util"] }
 log            = "0.4"
 env_logger     = "0.10"
 # HTTP proxy dependencies (for macOS/Windows support)
 hyper          = { version = "0.14", features = ["full"] }
+http           = "0.2"
+futures        = "0.3"
+bytes          = "1"
+clap           = { version = "4", features = ["derive"] }
+
+# Cross-platform: include agent-vault-common without eBPF features
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+agent-vault-common = { path = "../agent-vault-common" }
+
+# Linux-only: enable "userspace" feature which pulls in aya for eBPF map access
+[target.'cfg(target_os = "linux")'.dependencies]
+agent-vault-common = { path = "../agent-vault-common", features = ["userspace"] }
+aya            = "0.12"
+aya-log        = "0.2"
 http           = "0.2"
 futures        = "0.3"
 bytes          = "1"

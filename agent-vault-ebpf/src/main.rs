@@ -129,7 +129,7 @@ fn try_intercept(ctx: &SkBuffContext) -> Result<i32, i64> {
     // Step 6 — overwrite dummy_token bytes with real_token in the packet.
     let ret = unsafe {
         aya_ebpf::helpers::bpf_skb_store_bytes(
-            ctx.as_ptr() as *const _,
+            ctx.as_ptr() as *mut _,
             write_offset,
             pair.real_token.as_ptr() as *const _,
             TOKEN_LEN as u32,
@@ -145,7 +145,7 @@ fn try_intercept(ctx: &SkBuffContext) -> Result<i32, i64> {
     // is technically a no-op here.  Included for correctness and future-proofing.
     unsafe {
         aya_ebpf::helpers::bpf_l3_csum_replace(
-            ctx.as_ptr() as *const _,
+            ctx.as_ptr() as *mut _,
             IP_CSUM_OFFSET,
             0, // old = 0 → full recompute
             0, // new = 0 → full recompute
@@ -158,7 +158,7 @@ fn try_intercept(ctx: &SkBuffContext) -> Result<i32, i64> {
     // omits the IP pseudo-header, producing a checksum the remote will reject.
     unsafe {
         aya_ebpf::helpers::bpf_l4_csum_replace(
-            ctx.as_ptr() as *const _,
+            ctx.as_ptr() as *mut _,
             TCP_CSUM_OFFSET,
             0,                // old = 0 → full recompute
             0,                // new = 0 → full recompute
