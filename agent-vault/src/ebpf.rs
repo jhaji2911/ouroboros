@@ -4,7 +4,7 @@
 //! attaches the program, and populates the kernel HashMap with the token pair.
 
 use aya::{
-    bpf::Ebpf,
+    Ebpf,
     maps::HashMap,
     programs::{CgroupSkb, CgroupSkbAttachType},
 };
