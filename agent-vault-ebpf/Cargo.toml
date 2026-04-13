@@ -1,0 +1,21 @@
+[package]
+name = "agent-vault-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+# This crate MUST be compiled with nightly + bpfel-unknown-none target:
+#   cargo +nightly build \
+#     --package agent-vault-ebpf \
+#     --target bpfel-unknown-none \
+#     -Z build-std=core \
+#     --release
+
+[dependencies]
+aya-ebpf     = "0.1"
+aya-log-ebpf = "0.1"
+agent-vault-common = { path = "../agent-vault-common", features = ["ebpf"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"   # required for no_std BPF targets

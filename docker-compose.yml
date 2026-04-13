@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  agent-vault:
+    build: .
+    # privileged grants CAP_BPF + CAP_NET_ADMIN required to load/attach eBPF programs.
+    # For production, scope down to:
+    #   cap_add: [CAP_BPF, CAP_NET_ADMIN, CAP_SYS_ADMIN]
+    privileged: true
+    # pid: host is required so that bpf_get_current_cgroup_id() inside the kernel
+    # returns the host-namespace cgroup ID that matches the inode we read in user-space.
+    pid: host
+    volumes:
+      # Bind-mount the host's cgroup v2 filesystem (read-write) so the daemon can
+      # create /sys/fs/cgroup/agent-vault-test and the kernel cgroup ID is consistent.
+      - /sys/fs/cgroup:/sys/fs/cgroup
+    environment:
+      # Set RUST_LOG to see structured log output from the daemon.
+      RUST_LOG: info

@@ -1,0 +1,18 @@
+[package]
+name = "agent-vault"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "agent-vault"
+path = "src/main.rs"
+
+[dependencies]
+aya            = "0.12"
+aya-log        = "0.2"
+# Enable the "userspace" feature so agent-vault-common provides aya::Pod for TokenPair.
+agent-vault-common = { path = "../agent-vault-common", features = ["userspace"] }
+anyhow         = "1"
+tokio          = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+log            = "0.4"
+env_logger     = "0.10"
