@@ -1,0 +1,195 @@
+name: Release macOS (Homebrew)
+
+# Triggers on version tags: git tag v0.2.0 && git push --tags
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: agent-vault
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Build a universal macOS binary (arm64 + x86_64) on a single arm64 runner.
+  # Only the proxy-mode daemon is built here — eBPF is Linux-only.
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-macos-universal:
+    name: Build macOS Universal Binary
+    runs-on: macos-14 # Apple Silicon runner (arm64)
+
+    outputs:
+      version:    ${{ steps.meta.outputs.version }}
+      tarball:    ${{ steps.meta.outputs.tarball }}
+      sha256:     ${{ steps.sha.outputs.sha256 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Rust toolchains ──────────────────────────────────────────────────────
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # ── Build for both architectures ─────────────────────────────────────────
+      - name: Build arm64 (native)
+        run: |
+          cargo build --package agent-vault --release --target aarch64-apple-darwin
+
+      - name: Build x86_64 (cross-compile)
+        run: |
+          cargo build --package agent-vault --release --target x86_64-apple-darwin
+
+      # ── Merge into a single universal binary ─────────────────────────────────
+      - name: Create universal binary with lipo
+        run: |
+          lipo -create \
+            target/aarch64-apple-darwin/release/agent-vault \
+            target/x86_64-apple-darwin/release/agent-vault \
+            -output target/agent-vault-universal
+
+          # Confirm both slices are present
+          lipo -archs target/agent-vault-universal
+
+      # ── Package ──────────────────────────────────────────────────────────────
+      - name: Extract version from tag
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"   # strip leading 'v'
+          TARBALL="agent-vault-${VERSION}-universal-apple-darwin.tar.gz"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+
+      - name: Create tarball
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          TARBALL="${{ steps.meta.outputs.tarball }}"
+
+          mkdir -p dist
+          cp target/agent-vault-universal dist/agent-vault
+          chmod +x dist/agent-vault
+
+          # Include README and the security doc
+          cp README.md dist/
+          cp HOW_AGENTS_CANT_SEE_KEYS.md dist/ 2>/dev/null || true
+
+          tar -czf "${TARBALL}" -C dist .
+          echo "Created ${TARBALL} ($(du -sh ${TARBALL} | cut -f1))"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          TARBALL="${{ steps.meta.outputs.tarball }}"
+          SHA=$(shasum -a 256 "${TARBALL}" | awk '{print $1}')
+          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "${SHA}  ${TARBALL}" > "${TARBALL}.sha256"
+          echo "SHA256: ${SHA}"
+
+      # ── Upload artifacts for the release job ─────────────────────────────────
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: |
+            ${{ steps.meta.outputs.tarball }}
+            ${{ steps.meta.outputs.tarball }}.sha256
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Create the GitHub Release and attach the macOS tarball.
+  # Also patches Formula/agent-vault.rb with the new version + SHA256
+  # and opens an auto-merge PR so the tap stays in sync.
+  # ─────────────────────────────────────────────────────────────────────────────
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-macos-universal
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download tarball artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-universal
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name:   ${{ github.ref_name }}
+          name:       "agent-vault ${{ github.ref_name }}"
+          draft:      false
+          prerelease: false
+          body: |
+            ## agent-vault ${{ github.ref_name }}
+
+            ### Install via Homebrew (macOS)
+
+            ```bash
+            brew tap jhaji2911/ouroboros https://github.com/jhaji2911/ouroboros
+            brew install agent-vault
+            brew services start agent-vault
+            ```
+
+            Then add to your shell profile (`~/.zshrc`):
+            ```bash
+            export HTTP_PROXY=http://localhost:8888
+            export HTTPS_PROXY=http://localhost:8888
+            export NO_PROXY=localhost,127.0.0.1
+            ```
+
+            ### Manual install
+
+            ```bash
+            curl -LO https://github.com/jhaji2911/ouroboros/releases/download/${{ github.ref_name }}/${{ needs.build-macos-universal.outputs.tarball }}
+            tar xzf ${{ needs.build-macos-universal.outputs.tarball }}
+            xattr -d com.apple.quarantine ./agent-vault   # remove Gatekeeper quarantine
+            sudo mv agent-vault /usr/local/bin/
+            ```
+
+            ---
+
+            **SHA256:** `${{ needs.build-macos-universal.outputs.sha256 }}`
+
+            Built from commit: ${{ github.sha }}
+          files: |
+            ${{ needs.build-macos-universal.outputs.tarball }}
+            ${{ needs.build-macos-universal.outputs.tarball }}.sha256
+
+      # ── Auto-patch the Homebrew formula ──────────────────────────────────────
+      - name: Update Formula version and SHA256
+        run: |
+          VERSION="${{ needs.build-macos-universal.outputs.version }}"
+          SHA="${{ needs.build-macos-universal.outputs.sha256 }}"
+          FORMULA="Formula/agent-vault.rb"
+
+          # Update version field
+          sed -i "s/^  version \".*\"/  version \"${VERSION}\"/" "${FORMULA}"
+
+          # Update the sha256 for the universal tarball
+          sed -i "s/sha256 \"[a-f0-9]\{64\}\"/sha256 \"${SHA}\"/" "${FORMULA}"
+
+          # Update the download URL version
+          sed -i "s|/download/v[0-9.]\+/|/download/v${VERSION}/|g" "${FORMULA}"
+
+          echo "Formula patched:"
+          grep -E 'version|sha256|download' "${FORMULA}"
+
+      - name: Commit updated formula
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: bump formula to ${{ github.ref_name }} [skip ci]"
+          file_pattern: Formula/agent-vault.rb
+          branch: main
