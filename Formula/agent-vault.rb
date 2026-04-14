@@ -7,7 +7,7 @@ class AgentVault < Formula
   # SHA256 and URL version are auto-patched by .github/workflows/release-macos.yml
   # when a new tag is pushed. Do not edit these lines manually.
   url "https://github.com/jhaji2911/ouroboros/releases/download/v0.1.2/agent-vault-0.1.2-universal-apple-darwin.tar.gz"
-  sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
+  sha256 "e69516299ff704ed5a3768ef39cd53cab78b71573ee78af0f4d17377755e7e02"
 
   license "MIT"
 

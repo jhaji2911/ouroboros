@@ -22,7 +22,6 @@ jobs:
     outputs:
       version:    ${{ steps.meta.outputs.version }}
       tarball:    ${{ steps.meta.outputs.tarball }}
-      sha256:     ${{ steps.sha.outputs.sha256 }}
 
     steps:
       - name: Checkout
@@ -82,23 +81,12 @@ jobs:
           tar -czf "${TARBALL}" -C dist .
           echo "Created ${TARBALL} ($(du -sh ${TARBALL} | cut -f1))"
 
-      - name: Compute SHA256
-        id: sha
-        run: |
-          TARBALL="${{ steps.meta.outputs.tarball }}"
-          SHA=$(shasum -a 256 "${TARBALL}" | awk '{print $1}')
-          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "${SHA}  ${TARBALL}" > "${TARBALL}.sha256"
-          echo "SHA256: ${SHA}"
-
       # ── Upload artifacts for the release job ─────────────────────────────────
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-universal
-          path: |
-            ${{ steps.meta.outputs.tarball }}
-            ${{ steps.meta.outputs.tarball }}.sha256
+          path: ${{ steps.meta.outputs.tarball }}
           retention-days: 1
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -124,6 +112,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: macos-universal
+
+      # ── Compute SHA256 HERE — on the exact bytes that will be the release asset
+      # The upload-artifact → download-artifact round-trip can change the file.
+      # Hashing after download guarantees the formula SHA matches what brew fetches.
+      - name: Compute SHA256 of downloaded tarball
+        id: sha
+        run: |
+          TARBALL="${{ needs.build-macos-universal.outputs.tarball }}"
+          SHA=$(shasum -a 256 "${TARBALL}" | awk '{print $1}')
+          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
+          # Write a sidecar .sha256 file to attach to the release
+          echo "${SHA}  ${TARBALL}" > "${TARBALL}.sha256"
+          echo "SHA256: ${SHA}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -161,7 +162,7 @@ jobs:
 
             ---
 
-            **SHA256:** `${{ needs.build-macos-universal.outputs.sha256 }}`
+            **SHA256:** `${{ steps.sha.outputs.sha256 }}`
 
             Built from commit: ${{ github.sha }}
           files: |
@@ -172,7 +173,7 @@ jobs:
       - name: Update Formula version and SHA256
         run: |
           VERSION="${{ needs.build-macos-universal.outputs.version }}"
-          SHA="${{ needs.build-macos-universal.outputs.sha256 }}"
+          SHA="${{ steps.sha.outputs.sha256 }}"
           FORMULA="Formula/agent-vault.rb"
 
           # Update version field
