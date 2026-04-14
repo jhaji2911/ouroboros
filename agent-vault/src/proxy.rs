@@ -11,14 +11,7 @@
 //! ```
 
 use anyhow::{Context, Result};
-use bytes::Bytes;
-use http::{Method, Uri};
-use hyper::{
-    body::HttpBody, service::Service, Body, Client, Request, Response, Server,
-};
-use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::task::{Context as TaskContext, Poll};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -103,11 +96,12 @@ async fn handle_http_connection(
     let method_str = first_line_parts[0];
     let path = first_line_parts[1];
 
-    // Extract the Host header
+    // Extract the Host header, preserving any explicit port (e.g. host:8080).
     let mut host = String::new();
     for line in &lines[1..] {
-        if line.to_lowercase().starts_with("host:") {
-            host = line.split(':').nth(1).unwrap_or("").trim().to_string();
+        let trimmed = line.trim_end_matches('\r');
+        if trimmed.to_lowercase().starts_with("host:") {
+            host = trimmed["host:".len()..].trim().to_string();
             break;
         }
     }
@@ -119,39 +113,38 @@ async fn handle_http_connection(
 
     log::debug!("{} {}{} -> {}", method_str, host, path, peer_addr);
 
-    // Reconstruct headers with token rewriting
+    // Reconstruct headers, skipping the request line (index 0) and the Host
+    // header (added explicitly below so it appears exactly once).
+    // Use CRLF line endings as required by HTTP/1.1 (RFC 9112 §2.2).
     let mut headers_rewritten = String::new();
-    let mut body_start = 0;
-    let mut found_blank_line = false;
-
-    for (i, line) in lines.iter().enumerate() {
-        if line.is_empty() {
-            found_blank_line = true;
-            body_start = i + 1;
-            break;
+    for line in lines.iter().skip(1) {
+        let trimmed = line.trim_end_matches('\r');
+        if trimmed.is_empty() {
+            break; // blank line marks end of headers
         }
-        // Rewrite token in headers
-        let rewritten = rewrite_token(line);
-        headers_rewritten.push_str(&rewritten);
-        headers_rewritten.push('\n');
+        if trimmed.to_lowercase().starts_with("host:") {
+            continue; // omit; we add the canonical Host header below
+        }
+        headers_rewritten.push_str(&rewrite_token(trimmed));
+        headers_rewritten.push_str("\r\n");
     }
 
-    headers_rewritten.push('\n');
-
-    // Extract and rewrite body
-    let mut body_bytes = buffer[buffer.len().saturating_sub(2000)..].to_vec();
-    let body_str = String::from_utf8_lossy(&body_bytes);
+    // Extract the body: everything after the first \r\n\r\n in the raw buffer.
+    let body_bytes = find_body_slice(&buffer);
+    let body_str = String::from_utf8_lossy(body_bytes);
     let body_rewritten = rewrite_token(&body_str);
 
-    // Reconstruct the HTTP request with rewritten token
+    // Reconstruct the HTTP request with rewritten token.
+    // Format: request-line CRLF Host CRLF other-headers CRLF blank-line body
     let request_line = format!("{} {} HTTP/1.1\r\n", method_str, path);
-    let host_header = format!("host: {}\r\n", host);
+    let host_header  = format!("Host: {}\r\n", host);
 
-    let mut request_to_send = format!("{}{}", request_line, host_header);
+    let mut request_to_send = String::new();
+    request_to_send.push_str(&request_line);
+    request_to_send.push_str(&host_header);
     request_to_send.push_str(&headers_rewritten);
-    if !body_str.is_empty() {
-        request_to_send.push_str(&body_rewritten);
-    }
+    request_to_send.push_str("\r\n"); // blank line between headers and body
+    request_to_send.push_str(&body_rewritten);
 
     log::info!(
         "Intercepted {} request to {} (token rewritten: {} → {})",
@@ -161,10 +154,15 @@ async fn handle_http_connection(
         REAL_TOKEN
     );
 
-    // Forward to upstream server
-    let upstream_addr = format!("{}:80", host);
+    // Forward to upstream server.
+    // If the Host header already contains a port, use it; otherwise default to 80.
+    let upstream_addr = if host.contains(':') {
+        host.clone()
+    } else {
+        format!("{}:80", host)
+    };
     let mut upstream = tokio::net::TcpStream::connect(&upstream_addr).await
-        .context(format!("Failed to connect to upstream {}", upstream_addr))?;
+        .with_context(|| format!("Failed to connect to upstream {upstream_addr}"))?;
 
     upstream.write_all(request_to_send.as_bytes()).await?;
     upstream.flush().await?;
@@ -198,37 +196,52 @@ fn rewrite_token(input: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Body extraction
+// ---------------------------------------------------------------------------
+
+/// Return a slice of `buffer` starting after the first `\r\n\r\n` sequence,
+/// which separates HTTP headers from the body.  Returns an empty slice if no
+/// separator is found (header-only request).
+fn find_body_slice(buffer: &[u8]) -> &[u8] {
+    let len = buffer.len();
+    for i in 0..len.saturating_sub(3) {
+        if buffer[i..i + 4] == [b'\r', b'\n', b'\r', b'\n'] {
+            return &buffer[i + 4..];
+        }
+    }
+    &buffer[len..] // empty slice — no body
+}
+
+// ---------------------------------------------------------------------------
 // Banner
 // ---------------------------------------------------------------------------
 
 fn println_banner_proxy() {
-    let cyan = "\x1b[36m";
-    let green = "\x1b[32m";
-    let yellow = "\x1b[33m";
-    let bold = "\x1b[1m";
-    let dim = "\x1b[2m";
-    let reset = "\x1b[0m";
+    let cyan   = "\x1b[36m";
+    let bold   = "\x1b[1m";
+    let dim    = "\x1b[2m";
+    let reset  = "\x1b[0m";
 
+    println!();
     println!("{cyan}{bold}");
-    println!(r"        ____....----````----....____ ");
-    println!(r"   .--``                            ``--. ");
-    println!(r" /`   .--.        orouboros           .--.`\ ");
-    println!(r"|   /  _  \                          /  _  \ |");
-    println!(r"|  | (@) | |    HTTP proxy mode       | (@) |  |");
-    println!(r"|   \  ‾  /     credential vault      \  ‾  / |");
-    println!(r" \   `--`    ________________________   `--`  /");
-    println!(r"  `>  _     /     ↕ localhost:8888     \    _ <`");
-    println!(r"   | / \   /  [FAKE]⇄[REAL] rewrites   \  / \ |");
-    println!(r"   |/ ~~\/  HTTP headers & bodies       \/~~ \|");
-    println!(r"   (  o  )                              (  o  )");
-    println!(r"    \___/ `>___________________________<` \___/");
-    println!(r"           ════════════════════════════       ");
+    println!(r"          ≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋");
+    println!(r"         ≋                                      ≋");
+    println!(r"        ≋    ╔══════════════════════════════╗    ≋");
+    println!(r"        ≋    ║  ⊙  o u r o u b o r o s  ⊙  ║    ≋");
+    println!(r"        ≋    ║    a g e n t - v a u l t    ║    ≋");
+    println!(r"        ≋    ║    HTTP proxy  ·  port 8888  ║    ≋");
+    println!(r"        ≋    ║    [FAKE] ─────────► [REAL]  ║    ≋");
+    println!(r"        ≋    ╚══════════════════════════════╝    ≋");
+    println!(r"         ≋                                      ≋");
+    println!(r"          ≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋");
+    println!(r"   >≋─────────── TAIL · BODY · HEAD ────────────≋◄(@)");
+    println!(r"         ╰──── mouth closes the ring (ouroboros) ─╯");
     println!("{reset}");
 
     println!(
-        "{bold}  a g e n t - v a u l t{reset}  {dim}proxy mode — v{}{reset}",
+        "{bold}  agent-vault{reset}  {dim}v{}  ·  proxy mode{reset}",
         env!("CARGO_PKG_VERSION")
     );
-    println!("{dim}  HTTP/1.1 Credential Rewriter (macOS/Windows){reset}");
+    println!("{dim}  HTTP/1.1 Credential Rewriter (macOS / Windows / Linux){reset}");
     println!();
 }

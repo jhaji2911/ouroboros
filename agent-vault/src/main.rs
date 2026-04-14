@@ -71,11 +71,8 @@ async fn main() -> Result<()> {
 
     #[cfg(not(target_os = "linux"))]
     {
-        // On non-Linux platforms, force proxy mode (eBPF not supported)
-        if let Some(Mode::Proxy) = args.mode {
-            proxy::run_proxy_mode().await
-        } else {
-            proxy::run_proxy_mode().await
-        }
+        // On non-Linux platforms eBPF is unavailable; always run the proxy.
+        let _ = args;
+        proxy::run_proxy_mode().await
     }
 }
